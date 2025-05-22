@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import SessionControls from '@/components/SessionControls';
 
-const page = () => {
+const Page = () => {
     const [isSessionActive, setIsSessionActive] =
         useState(false);
     const [dataChannel, setDataChannel] =
@@ -180,4 +180,4 @@ const page = () => {
   );
 };
 
-export default page;
+export default Page;
