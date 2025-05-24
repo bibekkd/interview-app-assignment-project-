@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 interface Event {
     type: string;
@@ -20,6 +20,8 @@ interface Event {
             arguments: string;
         }>;
     };
+    delta?: string;
+    transcript?: string;
 }
 
 interface InterviewFormData {
@@ -33,6 +35,12 @@ interface InterviewEvaluationProps {
     };
 }
 
+interface TranscriptEntry {
+    role: string;
+    text: string;
+    timestamp: string;
+}
+
 interface ToolPanelProps {
     isSessionActive: boolean;
     sendClientEvent: (event: Event) => void;
@@ -42,12 +50,16 @@ interface ToolPanelProps {
     formData: InterviewFormData;
     interviewComplete: boolean;
     interviewScore: number | null;
-    transcript: Array<{ role: string; text: string }>;
+    transcript: TranscriptEntry[];
     functionCallOutput: {
         type: string;
         name: string;
         arguments: string;
     } | null;
+    currentUserTranscript: string;
+    currentAITranscript: string;
+    isUserSpeaking: boolean;
+    isAISpeaking: boolean;
 }
 
 // Interview tool description
@@ -141,160 +153,197 @@ function InterviewEvaluation({ functionCallOutput }: InterviewEvaluationProps) {
     );
 }
 
-export default function ToolPanel({
-    isSessionActive,
+function ToolPanel({
     sendClientEvent,
     events,
+    isSessionActive,
     interviewMode,
     currentQuestion,
     formData,
     interviewComplete,
     interviewScore,
-    transcript = [],
-    functionCallOutput
+    transcript,
+    functionCallOutput,
+    currentUserTranscript,
+    currentAITranscript,
+    isUserSpeaking,
+    isAISpeaking
 }: ToolPanelProps) {
-    const [functionAdded, setFunctionAdded] = useState(false);
     const transcriptEndRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        if (!events || events.length === 0 || !isSessionActive) return;
-
-        const firstEvent = events[events.length - 1];
-        if (!functionAdded && firstEvent.type === "session.created" && interviewMode && isSessionActive) {
-            sendClientEvent(interviewSessionUpdate);
-            setFunctionAdded(true);
-        }
-    }, [events, interviewMode, functionAdded, sendClientEvent, isSessionActive]);
-
-    useEffect(() => {
-        if (!isSessionActive) {
-            setFunctionAdded(false);
-        }
-    }, [isSessionActive]);
-
-    // Auto-scroll to bottom when transcript updates
+    // Auto-scroll to bottom of transcript
     useEffect(() => {
         if (transcriptEndRef.current) {
             transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
-    }, [transcript]);
+    }, [transcript, currentUserTranscript, currentAITranscript]);
 
-    // Get interview stage description
     const getInterviewStage = () => {
-        if (!formData.techStack.length) return "Waiting for candidate to specify their tech stack";
-        if (currentQuestion === 0) return "Interview not yet started";
-        if (currentQuestion >= 1 && currentQuestion <= 4) return `Question ${currentQuestion} of 4`;
-        if (interviewComplete) return "Interview completed";
-        return "Interview in progress";
+        if (!isSessionActive) return "Not Started";
+        if (currentQuestion === 0) return "Setup";
+        if (interviewComplete) return "Complete";
+        return `Question ${currentQuestion} of 4`;
+    };
+
+    const getSpeakingStatus = () => {
+        if (isUserSpeaking) return "User is speaking...";
+        if (isAISpeaking) return "AI is responding...";
+        return "Listening";
     };
 
     return (
-        <section className="h-full w-full flex flex-col gap-4">
-            <div className="h-full bg-white rounded-lg shadow-md p-6 flex flex-col">
-                <h2 className="text-xl font-bold text-gray-800 mb-4">Interview Assistant</h2>
-                {isSessionActive ? (
-                    <div className="flex flex-col gap-6">
-                        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                            <h3 className="font-semibold text-gray-700 mb-3">Interview Status</h3>
-                            <div className="flex flex-col gap-3">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-medium text-gray-600">Stage:</span>
-                                    <span className="text-blue-600 font-semibold">{getInterviewStage()}</span>
-                                </div>
-                                {formData.techStack.length > 0 && (
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium text-gray-600">Tech Stack:</span>
-                                        <span className="text-green-600 font-semibold">{formData.techStack.join(', ')}</span>
-                                    </div>
-                                )}
-                                {formData.level && (
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium text-gray-600">Level:</span>
-                                        <span className="text-purple-600 font-semibold">{formData.level}</span>
-                                    </div>
-                                )}
-                                {currentQuestion > 0 && currentQuestion <= 4 && (
-                                    <div className="flex flex-col gap-2">
-                                        <span className="font-medium text-gray-600">Progress:</span>
-                                        <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                            <div 
-                                                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
-                                                style={{ width: `${(currentQuestion / 4) * 100}%` }}
-                                            ></div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        
-                        {functionCallOutput ? (
-                            <InterviewEvaluation functionCallOutput={functionCallOutput} />
-                        ) : interviewComplete || currentQuestion > 4 ? (
-                            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-100">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-yellow-800">⏳</span>
-                                    <p className="text-yellow-800 font-medium">Evaluating interview responses...</p>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-100">
-                                <h3 className="font-semibold text-gray-700 mb-3">Interview Instructions</h3>
-                                <ol className="list-decimal pl-5 space-y-2 text-gray-600">
-                                    <li>Start by telling the assistant what tech stack you&apos;re proficient in</li>
-                                    <li>The assistant will ask you 4 technical questions</li>
-                                    <li>Answer each question to the best of your ability</li>
-                                    <li>After all questions, you&apos;ll receive a score and feedback</li>
-                                </ol>
-                            </div>
-                        )}
-                        
-                        {/* Transcript Section */}
-                        <div className="flex-1 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="font-semibold text-gray-700">Live Transcript</h3>
-                                <span className="text-sm text-gray-500">
-                                    {transcript.length} messages
-                                </span>
-                            </div>
-                            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                                {transcript.length === 0 ? (
-                                    <div className="text-center py-8 text-gray-500">
-                                        <p>No messages yet. The transcript will appear here as you speak.</p>
-                                    </div>
-                                ) : (
-                                    transcript.map((entry, index) => (
-                                        <div 
-                                            key={index} 
-                                            className={`p-3 rounded-lg ${
-                                                entry.role === "User" 
-                                                    ? "bg-blue-50 border border-blue-100" 
-                                                    : "bg-white border border-gray-200"
-                                            }`}
-                                        >
-                                            <div className="flex items-start gap-2">
-                                                <span className={`font-medium ${
-                                                    entry.role === "User" 
-                                                        ? "text-blue-700" 
-                                                        : "text-gray-700"
-                                                }`}>
-                                                    {entry.role}:
-                                                </span>
-                                                <span className="text-gray-600 flex-1">{entry.text}</span>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                                <div ref={transcriptEndRef} />
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="flex-1 flex items-center justify-center">
-                        <p className="text-gray-500">Start the session to begin your technical interview...</p>
+        <div className="h-full flex flex-col">
+            {/* Header */}
+            <div className="p-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-800">Interview Panel</h2>
+                <div className="mt-2 flex items-center gap-2">
+                    <span className={`inline-block w-2 h-2 rounded-full ${
+                        isSessionActive ? 'bg-green-500' : 'bg-gray-400'
+                    }`}></span>
+                    <span className="text-sm text-gray-600">{getInterviewStage()}</span>
+                </div>
+                {isSessionActive && (
+                    <div className="mt-1 flex items-center gap-2">
+                        <span className={`inline-block w-2 h-2 rounded-full ${
+                            isUserSpeaking ? 'bg-red-500 animate-pulse' : 
+                            isAISpeaking ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'
+                        }`}></span>
+                        <span className="text-xs text-gray-500">{getSpeakingStatus()}</span>
                     </div>
                 )}
             </div>
-        </section>
+
+            {/* Main Content */}
+            <div className="flex-1 overflow-y-auto p-4">
+                {/* Live Transcript Section */}
+                <div className="mb-6">
+                    <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-md font-medium text-gray-700">Live Transcript</h3>
+                        <span className="text-sm text-gray-500">
+                            {transcript.length} messages
+                            {(currentUserTranscript || currentAITranscript) && " • Live"}
+                        </span>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4 h-[400px] overflow-y-auto">
+                        {transcript.length === 0 && !currentUserTranscript && !currentAITranscript ? (
+                            <div className="h-full flex items-center justify-center text-gray-500">
+                                <div className="text-center">
+                                    <p>No messages yet.</p>
+                                    <p className="text-xs mt-1">Start speaking to see the transcript.</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {/* Completed transcript entries */}
+                                {transcript.map((entry, index) => (
+                                    <div
+                                        key={index}
+                                        className={`flex flex-col ${
+                                            entry.role === "User" ? "items-end" : "items-start"
+                                        }`}
+                                    >
+                                        <div className={`max-w-[80%] rounded-lg p-3 ${
+                                            entry.role === "User"
+                                                ? "bg-blue-100 text-blue-800"
+                                                : "bg-gray-100 text-gray-800"
+                                        }`}>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <div className="text-xs font-medium">
+                                                    {entry.role}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {entry.timestamp}
+                                                </div>
+                                            </div>
+                                            <div className="text-sm">{entry.text}</div>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {/* Live user transcript */}
+                                {(isUserSpeaking || currentUserTranscript) && (
+                                    <div className="flex flex-col items-end">
+                                        <div className="max-w-[80%] rounded-lg p-3 bg-blue-50 border-2 border-blue-200 text-blue-800">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <div className="text-xs font-medium">User</div>
+                                                <div className="text-xs text-blue-600">
+                                                    {isUserSpeaking ? "Speaking..." : "Processing..."}
+                                                </div>
+                                                {isUserSpeaking && (
+                                                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                                                )}
+                                            </div>
+                                            <div className="text-sm">
+                                                {currentUserTranscript || "..."}
+                                                {isUserSpeaking && <span className="animate-pulse">|</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Live AI transcript */}
+                                {(isAISpeaking || currentAITranscript) && (
+                                    <div className="flex flex-col items-start">
+                                        <div className="max-w-[80%] rounded-lg p-3 bg-green-50 border-2 border-green-200 text-gray-800">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <div className="text-xs font-medium">AI Interviewer</div>
+                                                <div className="text-xs text-green-600">
+                                                    {isAISpeaking ? "Speaking..." : "Processing..."}
+                                                </div>
+                                                {isAISpeaking && (
+                                                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                                                )}
+                                            </div>
+                                            <div className="text-sm">
+                                                {currentAITranscript || "..."}
+                                                {isAISpeaking && <span className="animate-pulse">|</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div ref={transcriptEndRef} />
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Interview Evaluation Section */}
+                {interviewComplete && functionCallOutput && (
+                    <div className="mb-6">
+                        <h3 className="text-md font-medium text-gray-700 mb-2">Interview Evaluation</h3>
+                        <div className="bg-white rounded-lg shadow p-4">
+                            <InterviewEvaluation functionCallOutput={functionCallOutput} />
+                        </div>
+                    </div>
+                )}
+
+                {/* Events Log Section */}
+                <div>
+                    <h3 className="text-md font-medium text-gray-700 mb-2">Events Log</h3>
+                    <div className="bg-gray-50 rounded-lg p-4 h-[200px] overflow-y-auto">
+                        {events.length === 0 ? (
+                            <p className="text-gray-500">No events yet</p>
+                        ) : (
+                            <div className="space-y-2">
+                                {events.slice(0, 20).map((event, index) => (
+                                    <div key={index} className="text-sm">
+                                        <span className="text-gray-500">{event.timestamp}</span>
+                                        <span className="ml-2 text-gray-700">{event.type}</span>
+                                        {(event.type.includes('transcript') || event.type.includes('speech')) && (
+                                            <span className="ml-2 text-blue-600 text-xs">
+                                                {event.delta || event.transcript || ''}
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 }
 
+export default ToolPanel;

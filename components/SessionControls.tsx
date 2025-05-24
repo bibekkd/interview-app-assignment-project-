@@ -1,5 +1,29 @@
 import { useState } from 'react';
 
+interface Event {
+    type: string;
+    event_id?: string;
+    timestamp?: string;
+    item?: {
+        type: string;
+        role: string;
+        content?: Array<{
+            type: string;
+            text: string;
+        }>;
+    };
+    response?: {
+        instructions?: string;
+        output?: Array<{
+            type: string;
+            name: string;
+            arguments: string;
+        }>;
+    };
+    delta?: string;
+    transcript?: string;
+}
+
 interface InterviewFormData {
     techStack: string[];
     level: string;
@@ -16,6 +40,8 @@ export interface SessionControlsProps {
     interviewComplete: boolean;
     interviewScore: number | null;
     sendClientEvent: (event: Event) => void;
+    isUserSpeaking: boolean;
+    isAISpeaking: boolean;
 }
 
 function SessionStopped({
@@ -174,7 +200,9 @@ function SessionActive({
     interviewComplete,
     interviewScore,
     sendClientEvent,
-    setCurrentQuestion
+    setCurrentQuestion,
+    isUserSpeaking,
+    isAISpeaking
 }: {
     stopSession: () => void;
     formData: InterviewFormData;
@@ -183,6 +211,8 @@ function SessionActive({
     interviewScore: number | null;
     sendClientEvent: (event: Event) => void;
     setCurrentQuestion: (question: number) => void;
+    isUserSpeaking: boolean;
+    isAISpeaking: boolean;
 }) {
     const [isDisconnecting, setIsDisconnecting] = useState(false);
 
@@ -201,7 +231,6 @@ function SessionActive({
 
     const handleSkipQuestion = () => {
         if (currentQuestion < 4) {
-            // Increment the question counter directly
             setCurrentQuestion(currentQuestion + 1);
             
             sendClientEvent({
@@ -216,6 +245,12 @@ function SessionActive({
     const getInterviewStatus = () => {
         if (interviewComplete) return "Interview complete";
         return `Question ${currentQuestion} of 4`;
+    };
+
+    const getSpeakingStatus = () => {
+        if (isUserSpeaking) return "You are speaking...";
+        if (isAISpeaking) return "AI is responding...";
+        return "Listening...";
     };
 
     return (
@@ -243,12 +278,6 @@ function SessionActive({
                                     <span className="text-purple-600 font-semibold">{formData.level}</span>
                                 </div>
                             )}
-                            {interviewScore !== null && (
-                                <div className="flex items-center gap-2">
-                                    <span className="font-medium text-gray-700">Score:</span>
-                                    <span className="font-bold text-yellow-600">{interviewScore}/100</span>
-                                </div>
-                            )}
                         </div>
                     </div>
                     {currentQuestion > 0 && currentQuestion <= 4 && (
@@ -264,9 +293,18 @@ function SessionActive({
 
             <div className="bg-white rounded-lg shadow-md p-4">
                 <div className="flex items-center justify-between">
-                    <div className="text-sm text-green-600 font-medium flex items-center gap-2">
-                        <span>🎙️</span>
-                        <span>Session Active - Happy Interviewing!</span>
+                    <div className="flex items-center gap-3">
+                        <div className="text-sm text-green-600 font-medium flex items-center gap-2">
+                            <span>🎙️</span>
+                            <span>Session Active</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className={`inline-block w-2 h-2 rounded-full ${
+                                isUserSpeaking ? 'bg-red-500 animate-pulse' : 
+                                isAISpeaking ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'
+                            }`}></span>
+                            <span className="text-sm text-gray-600">{getSpeakingStatus()}</span>
+                        </div>
                     </div>
                     <div className="flex items-center gap-2">
                         {currentQuestion > 0 && currentQuestion < 4 && !interviewComplete && (
@@ -307,14 +345,16 @@ export default function SessionControls({
     setCurrentQuestion,
     interviewComplete,
     interviewScore,
-    sendClientEvent
+    sendClientEvent,
+    isUserSpeaking,
+    isAISpeaking
 }: SessionControlsProps) {
     const handleFormSubmit = () => {
         setCurrentQuestion(1);
         sendClientEvent({
             type: "response.create",
             response: {
-                instructions: `You are a technical interviewer. The candidate knows ${formData.techStack.join(', ')} and wants a ${formData.level} level interview. You must ask exactly 4 technical questions, no more and no less. Start with the first question.`
+                instructions: `You are a technical interviewer. The candidate knows ${formData.techStack.join(', ')} and wants a ${formData.level} level interview. You must ask exactly 4 technical questions, no more and no less. Start with the first question. If the candidate completed 4 questions, you must end the interview. If the candidate wants to skip a question, you must ask the next question. `
             }
         });
     };
@@ -338,6 +378,8 @@ export default function SessionControls({
                     interviewScore={interviewScore}
                     sendClientEvent={sendClientEvent}
                     setCurrentQuestion={setCurrentQuestion}
+                    isUserSpeaking={isUserSpeaking}
+                    isAISpeaking={isAISpeaking}
                 />
             )}
         </div>
