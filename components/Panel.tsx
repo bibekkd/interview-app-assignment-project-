@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 interface Event {
     type: string;
@@ -22,6 +22,11 @@ interface Event {
     };
 }
 
+interface InterviewFormData {
+    techStack: string[];
+    level: string;
+}
+
 interface InterviewEvaluationProps {
     functionCallOutput: {
         arguments: string;
@@ -31,12 +36,10 @@ interface InterviewEvaluationProps {
 interface ToolPanelProps {
     isSessionActive: boolean;
     sendClientEvent: (event: Event) => void;
-    sendTextMessage: (message: string) => void;
     events: Event[];
     interviewMode: boolean;
     currentQuestion: number;
-    techStack: string;
-    level: string;
+    formData: InterviewFormData;
     interviewComplete: boolean;
     interviewScore: number | null;
     transcript: Array<{ role: string; text: string }>;
@@ -95,10 +98,19 @@ function InterviewEvaluation({ functionCallOutput }: InterviewEvaluationProps) {
         score: Record<string, number>;
     };
 
+    const totalScore = Math.round(
+        Object.values(score).reduce((sum, value) => sum + value, 0) / Object.keys(score).length
+    );
+
     return (
         <div className="flex flex-col gap-4">
             <div className="bg-white p-6 rounded-lg shadow-md border border-blue-100">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Interview Results</h3>
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-gray-800">Interview Results</h3>
+                    <div className="bg-blue-100 px-4 py-2 rounded-lg">
+                        <span className="text-blue-800 font-bold">Total Score: {totalScore}/10</span>
+                    </div>
+                </div>
                 <div className="flex flex-col gap-4">
                     <div className="bg-blue-50 p-4 rounded-lg">
                         <h4 className="font-semibold text-gray-700 mb-2">Interview Summary</h4>
@@ -132,28 +144,27 @@ function InterviewEvaluation({ functionCallOutput }: InterviewEvaluationProps) {
 export default function ToolPanel({
     isSessionActive,
     sendClientEvent,
-    sendTextMessage,
     events,
     interviewMode,
     currentQuestion,
-    techStack,
-    level,
+    formData,
     interviewComplete,
     interviewScore,
     transcript = [],
     functionCallOutput
 }: ToolPanelProps) {
     const [functionAdded, setFunctionAdded] = useState(false);
+    const transcriptEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (!events || events.length === 0) return;
+        if (!events || events.length === 0 || !isSessionActive) return;
 
         const firstEvent = events[events.length - 1];
-        if (!functionAdded && firstEvent.type === "session.created" && interviewMode) {
+        if (!functionAdded && firstEvent.type === "session.created" && interviewMode && isSessionActive) {
             sendClientEvent(interviewSessionUpdate);
             setFunctionAdded(true);
         }
-    }, [events, interviewMode]);
+    }, [events, interviewMode, functionAdded, sendClientEvent, isSessionActive]);
 
     useEffect(() => {
         if (!isSessionActive) {
@@ -161,9 +172,16 @@ export default function ToolPanel({
         }
     }, [isSessionActive]);
 
+    // Auto-scroll to bottom when transcript updates
+    useEffect(() => {
+        if (transcriptEndRef.current) {
+            transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [transcript]);
+
     // Get interview stage description
     const getInterviewStage = () => {
-        if (!techStack) return "Waiting for candidate to specify their tech stack";
+        if (!formData.techStack.length) return "Waiting for candidate to specify their tech stack";
         if (currentQuestion === 0) return "Interview not yet started";
         if (currentQuestion >= 1 && currentQuestion <= 4) return `Question ${currentQuestion} of 4`;
         if (interviewComplete) return "Interview completed";
@@ -183,16 +201,16 @@ export default function ToolPanel({
                                     <span className="font-medium text-gray-600">Stage:</span>
                                     <span className="text-blue-600 font-semibold">{getInterviewStage()}</span>
                                 </div>
-                                {techStack && (
+                                {formData.techStack.length > 0 && (
                                     <div className="flex items-center gap-2">
                                         <span className="font-medium text-gray-600">Tech Stack:</span>
-                                        <span className="text-green-600 font-semibold">{techStack}</span>
+                                        <span className="text-green-600 font-semibold">{formData.techStack.join(', ')}</span>
                                     </div>
                                 )}
-                                {level && (
+                                {formData.level && (
                                     <div className="flex items-center gap-2">
                                         <span className="font-medium text-gray-600">Level:</span>
-                                        <span className="text-purple-600 font-semibold">{level}</span>
+                                        <span className="text-purple-600 font-semibold">{formData.level}</span>
                                     </div>
                                 )}
                                 {currentQuestion > 0 && currentQuestion <= 4 && (
@@ -211,9 +229,12 @@ export default function ToolPanel({
                         
                         {functionCallOutput ? (
                             <InterviewEvaluation functionCallOutput={functionCallOutput} />
-                        ) : interviewComplete ? (
+                        ) : interviewComplete || currentQuestion > 4 ? (
                             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-100">
-                                <p className="text-yellow-800 font-medium">Evaluating interview responses...</p>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-yellow-800">⏳</span>
+                                    <p className="text-yellow-800 font-medium">Evaluating interview responses...</p>
+                                </div>
                             </div>
                         ) : (
                             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-100">
@@ -229,18 +250,41 @@ export default function ToolPanel({
                         
                         {/* Transcript Section */}
                         <div className="flex-1 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                            <h3 className="font-semibold text-gray-700 mb-3">Interview Transcript</h3>
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="font-semibold text-gray-700">Live Transcript</h3>
+                                <span className="text-sm text-gray-500">
+                                    {transcript.length} messages
+                                </span>
+                            </div>
                             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                                {transcript.map((entry, index) => (
-                                    <div key={index} className={`p-3 rounded-lg ${
-                                        entry.role === "User" 
-                                            ? "bg-blue-50 border border-blue-100" 
-                                            : "bg-white border border-gray-200"
-                                    }`}>
-                                        <span className="font-medium text-gray-700">{entry.role}: </span>
-                                        <span className="text-gray-600">{entry.text}</span>
+                                {transcript.length === 0 ? (
+                                    <div className="text-center py-8 text-gray-500">
+                                        <p>No messages yet. The transcript will appear here as you speak.</p>
                                     </div>
-                                ))}
+                                ) : (
+                                    transcript.map((entry, index) => (
+                                        <div 
+                                            key={index} 
+                                            className={`p-3 rounded-lg ${
+                                                entry.role === "User" 
+                                                    ? "bg-blue-50 border border-blue-100" 
+                                                    : "bg-white border border-gray-200"
+                                            }`}
+                                        >
+                                            <div className="flex items-start gap-2">
+                                                <span className={`font-medium ${
+                                                    entry.role === "User" 
+                                                        ? "text-blue-700" 
+                                                        : "text-gray-700"
+                                                }`}>
+                                                    {entry.role}:
+                                                </span>
+                                                <span className="text-gray-600 flex-1">{entry.text}</span>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                                <div ref={transcriptEndRef} />
                             </div>
                         </div>
                     </div>

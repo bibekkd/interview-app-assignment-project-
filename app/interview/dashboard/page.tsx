@@ -31,6 +31,11 @@ interface TranscriptEntry {
     text: string;
 }
 
+interface InterviewFormData {
+    techStack: string[];
+    level: string;
+}
+
 const Page = () => {
     const [isSessionActive, setIsSessionActive] = useState(false);
     const [dataChannel, setDataChannel] = useState<RTCDataChannel | null>(null);
@@ -40,8 +45,10 @@ const Page = () => {
 
     // Interview state
     const [interviewMode, setInterviewMode] = useState(true);
-    const [techStack, setTechStack] = useState("");
-    const [level, setLevel] = useState("");
+    const [formData, setFormData] = useState<InterviewFormData>({
+        techStack: [],
+        level: ""
+    });
     const [currentQuestion, setCurrentQuestion] = useState(0);
     const [answers, setAnswers] = useState<string[]>([]);
     const [interviewComplete, setInterviewComplete] = useState(false);
@@ -131,19 +138,26 @@ const Page = () => {
             audioElement.current.srcObject = null;
         }
 
-        if (interviewMode && techStack && currentQuestion > 0 && !interviewComplete && answers.length > 0) {
+        if (interviewMode && formData.techStack.length > 0 && currentQuestion > 0 && !interviewComplete) {
             setInterviewComplete(true);
+            const answersCount = answers.length || 0;
+            const summaryText = answersCount > 0 
+                ? `Partial interview evaluation based on ${answersCount} questions answered. The candidate showed interest in ${formData.techStack.join(', ')} at ${formData.level} level.`
+                : `Interview ended early. The candidate was interested in ${formData.techStack.join(', ')} at ${formData.level} level but did not complete any questions.`;
+            
+            const scoreValue = Math.max(3, Math.round((answersCount / 4) * 7));
+            
             const partialEvaluation = {
                 type: "function_call",
                 name: "evaluate_interview",
                 arguments: JSON.stringify({
-                    interview_summary: `Partial interview evaluation based on ${answers.length} questions answered. The candidate showed interest in ${techStack} at ${level} level.`,
+                    interview_summary: summaryText,
                     score: {
-                        communication: Math.max(5, Math.round((answers.length / 4) * 7)),
-                        problem_solving: Math.max(5, Math.round((answers.length / 4) * 7)),
-                        technical_depth: Math.max(5, Math.round((answers.length / 4) * 7)),
-                        culture_fit: Math.max(5, Math.round((answers.length / 4) * 7)),
-                        clarity_brevity: Math.max(5, Math.round((answers.length / 4) * 7))
+                        communication: scoreValue,
+                        problem_solving: scoreValue,
+                        technical_depth: scoreValue,
+                        culture_fit: scoreValue,
+                        clarity_brevity: scoreValue
                     }
                 })
             };
@@ -170,90 +184,6 @@ const Page = () => {
         }
     }
 
-    function sendTextMessage(message: string) {
-        const event: Event = {
-            type: "conversation.item.create",
-            item: {
-                type: "message",
-                role: "user",
-                content: [
-                    {
-                        type: "input_text",
-                        text: message,
-                    },
-                ],
-            },
-        };
-
-        setTranscript(prev => [...prev, { role: "User", text: message }]);
-        sendClientEvent(event);
-
-        if (interviewMode) {
-            if (!techStack && currentQuestion === 0) {
-                setTechStack(message);
-                setCurrentQuestion(1);
-                sendClientEvent({
-                    type: "response.create",
-                    response: {
-                        instructions: `You are a technical interviewer. The candidate mentioned they know ${message}. Ask them what level of interview they want (Junior, Mid-level, or Senior).`
-                    }
-                });
-                return;
-            }
-
-            if (!level && currentQuestion === 1) {
-                setLevel(message);
-                setCurrentQuestion(2);
-                sendClientEvent({
-                    type: "response.create",
-                    response: {
-                        instructions: `Ask the candidate the first technical question about ${techStack} at ${message} level. Be specific and challenging.`
-                    }
-                });
-                return;
-            }
-
-            if (currentQuestion >= 2 && currentQuestion <= 5) {
-                if (message.toLowerCase().includes("skip")) {
-                    setCurrentQuestion(prev => prev + 1);
-                    if (currentQuestion < 5) {
-                        sendClientEvent({
-                            type: "response.create",
-                            response: {
-                                instructions: `Ask the candidate technical question #${currentQuestion + 1} about ${techStack} at ${level} level.`
-                            }
-                        });
-                    }
-                    return;
-                }
-
-                setAnswers(prev => [...prev, message]);
-                
-                if (currentQuestion < 5) {
-                    setCurrentQuestion(prev => prev + 1);
-                    sendClientEvent({
-                        type: "response.create",
-                        response: {
-                            instructions: `Ask the candidate technical question #${currentQuestion + 1} about ${techStack} at ${level} level.`
-                        }
-                    });
-                } else {
-                    setInterviewComplete(true);
-                    setCurrentQuestion(6);
-                    sendClientEvent({
-                        type: "response.create",
-                        response: {
-                            instructions: `The technical interview is now complete. Evaluate the candidate's answers to the 4 questions about ${techStack} at ${level} level. Provide a detailed assessment with scores for communication, problem-solving, technical depth, culture fit, and clarity & brevity.`
-                        }
-                    });
-                }
-                return;
-            }
-        }
-        
-        sendClientEvent({ type: "response.create" });
-    }
-
     useEffect(() => {
         if (dataChannel) {
             dataChannel.addEventListener("message", (e) => {
@@ -262,13 +192,73 @@ const Page = () => {
                     event.timestamp = new Date().toLocaleTimeString();
                 }
 
+                // Handle transcription events
                 if (event.type === "conversation.item.create" && 
                     event.item?.role === "assistant" && 
                     event.item?.content?.[0]?.type === "input_text") {
                     const text = event.item.content[0].text;
                     setTranscript(prev => [...prev, { role: "AI interviewer", text }]);
+
+                    // Check if this is the last question
+                    if (currentQuestion === 4) {
+                        setInterviewComplete(true);
+                        sendClientEvent({
+                            type: "response.create",
+                            response: {
+                                instructions: `The interview is complete. Evaluate the candidate's performance based on their answers to the 4 questions about ${formData.techStack.join(', ')} at ${formData.level} level.`
+                            }
+                        });
+                    }
                 }
 
+                // Handle user transcription
+                if (event.type === "conversation.item.create" && 
+                    event.item?.role === "user" && 
+                    event.item?.content?.[0]?.type === "input_text") {
+                    const text = event.item.content[0].text;
+                    setTranscript(prev => [...prev, { role: "User", text }]);
+
+                    // Check for skip command in user's text
+                    const skipKeywords = ["skip", "skip question", "next question", "move on"];
+                    const hasSkipCommand = skipKeywords.some(keyword => 
+                        text.toLowerCase().includes(keyword));
+                    
+                    if (hasSkipCommand && currentQuestion > 0 && currentQuestion < 4) {
+                        // Skip to next question
+                        setCurrentQuestion(prev => prev + 1);
+                        sendClientEvent({
+                            type: "response.create",
+                            response: {
+                                instructions: `The candidate wants to skip question ${currentQuestion}. Move to question ${currentQuestion + 1} about ${formData.techStack.join(', ')} at ${formData.level} level.`
+                            }
+                        });
+                    } else {
+                        // Normal question increment after user's response
+                        if (currentQuestion > 0 && currentQuestion < 4) {
+                            setCurrentQuestion(prev => prev + 1);
+                        }
+                    }
+                    
+                    // Auto-end session when all questions are completed
+                    if (currentQuestion === 4 && !interviewComplete) {
+                        setInterviewComplete(true);
+                        sendClientEvent({
+                            type: "response.create",
+                            response: {
+                                instructions: `The interview is complete. Evaluate the candidate's performance based on their answers to the 4 questions about ${formData.techStack.join(', ')} at ${formData.level} level.`
+                            }
+                        });
+                        
+                        // Auto-stop session after a short delay to allow evaluation to complete
+                        setTimeout(() => {
+                            if (isSessionActive) {
+                                stopSession();
+                            }
+                        }, 5000);
+                    }
+                }
+
+                // Handle function calls
                 if (event.type === "response.done" && event.response?.output) {
                     event.response.output.forEach((output) => {
                         if (output.type === "function_call" && output.name === "evaluate_interview") {
@@ -294,28 +284,19 @@ const Page = () => {
                 setIsSessionActive(true);
                 setEvents([]);
                 
-                setTechStack("");
-                setLevel("");
+                setFormData({
+                    techStack: [],
+                    level: ""
+                });
                 setCurrentQuestion(0);
                 setAnswers([]);
                 setInterviewComplete(false);
                 setInterviewScore(null);
                 setTranscript([]);
                 setFunctionCallOutput(null);
-                
-                if (interviewMode) {
-                    setTimeout(() => {
-                        sendClientEvent({
-                            type: "response.create",
-                            response: {
-                                instructions: "You are a technical interviewer. Ask the candidate what tech stack they're proficient in. Be direct and concise."
-                            }
-                        });
-                    }, 1000);
-                }
             });
         }
-    }, [dataChannel, interviewMode, currentQuestion, techStack, level, interviewComplete]);
+    }, [dataChannel, interviewMode, currentQuestion, formData, interviewComplete, sendClientEvent, setCurrentQuestion]);
 
     return (
         <div className="flex min-h-screen bg-gray-50">
@@ -326,12 +307,13 @@ const Page = () => {
                         startSession={startSession}
                         stopSession={stopSession}
                         isSessionActive={isSessionActive}
-                        techStack={techStack}
-                        level={level}
-                        sendTextMessage={sendTextMessage}
+                        formData={formData}
+                        setFormData={setFormData}
                         currentQuestion={currentQuestion}
+                        setCurrentQuestion={setCurrentQuestion}
                         interviewComplete={interviewComplete}
                         interviewScore={interviewScore}
+                        sendClientEvent={sendClientEvent}
                     />
                 </div>
             </div>
@@ -341,13 +323,11 @@ const Page = () => {
                 <div className="h-full overflow-y-auto">
                     <ToolPanel
                         sendClientEvent={sendClientEvent}
-                        sendTextMessage={sendTextMessage}
                         events={events}
                         isSessionActive={isSessionActive}
                         interviewMode={interviewMode}
                         currentQuestion={currentQuestion}
-                        techStack={techStack}
-                        level={level}
+                        formData={formData}
                         interviewComplete={interviewComplete}
                         interviewScore={interviewScore}
                         transcript={transcript}
